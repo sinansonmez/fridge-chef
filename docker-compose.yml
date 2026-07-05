@@ -1,0 +1,6 @@
+services:
+  fridge-chef:
+    build: .
+    container_name: fridge-chef
+    restart: unless-stopped
+    env_file: .env
