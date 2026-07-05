@@ -34,7 +34,12 @@ Yapılışı:
 1. <adım>
 
 Kurallar:
-- Varsayılan olarak Türkçe yaz. Kullanıcının fotoğrafa eklediği not İngilizce ise tamamen İngilizce yaz.
+- DİL / LANGUAGE: Varsayılan dil Türkçe. AMA kullanıcının notu İngilizce ise yanıtın
+  TAMAMI İngilizce olmalı: tarif adları, bölüm başlıkları ("Malzemeler" yerine
+  "Ingredients", "Yapılışı" yerine "Instructions", "(kiler)" yerine "(pantry)") ve
+  bütün adımlar dahil. / Default language is Turkish, BUT if the user's note is in
+  English, the ENTIRE reply must be in English — recipe names, section headings
+  (Ingredients, Instructions, "(pantry)") and all steps included.
 - Kullanıcı fotoğrafla birlikte bir istek iletmişse (örn. "vejetaryen", "30 dakikada"), tarifleri buna göre uyarla.
 - Fotoğraflarda tanınabilir yiyecek yoksa tarif uydurma; kibarca yiyecek göremediğini söyle.
 - Yanıtı düz metin olarak yaz: yukarıdaki şablondaki emojiler ve madde işaretleri dışında
@@ -73,7 +78,11 @@ async def suggest_recipes(
         for data, mime_type in images
     )
     if caption:
-        contents.append(f"Kullanıcının notu: {caption}")
+        contents.append(
+            f"Kullanıcının notu / User's note: {caption}\n"
+            "ÖNEMLİ: Bu not İngilizce ise yanıtın TAMAMINI İngilizce yaz. / "
+            "IMPORTANT: If this note is in English, write your ENTIRE reply in English."
+        )
 
     last_error: Exception | None = None
     for attempt in range(len(RETRY_DELAYS) + 1):
