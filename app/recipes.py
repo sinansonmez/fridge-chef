@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 
 from google import genai
 from google.genai import types
@@ -45,13 +46,28 @@ class RecipeError(Exception):
     """Both the main and the fallback model failed."""
 
 
+# Matches the "🍳 <n>. <name>" heading the prompt template enforces.
+RECIPE_NAME_RE = re.compile(r"^🍳\s*\d+[.)]?\s*(.+)$", re.MULTILINE)
+
+
+def extract_recipe_names(text: str) -> list[str]:
+    return [name.strip() for name in RECIPE_NAME_RE.findall(text) if name.strip()]
+
+
 async def suggest_recipes(
     client: genai.Client,
     config: Config,
     images: list[tuple[bytes, str]],
     caption: str | None,
+    avoid: list[str] | None = None,
 ) -> str:
     contents: list = [PROMPT]
+    if avoid:
+        avoid_lines = "\n".join(f"- {name}" for name in avoid)
+        contents.append(
+            "Şu yemekler son günlerde zaten önerildi. Bunları veya bunların"
+            f" çok benzeri varyasyonlarını ÖNERME:\n{avoid_lines}"
+        )
     contents.extend(
         types.Part.from_bytes(data=data, mime_type=mime_type)
         for data, mime_type in images

@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from datetime import datetime, timezone
 
 from google import genai
 from telegram import Message, Update
@@ -14,7 +15,8 @@ from telegram.ext import (
 )
 
 from config import load_config
-from recipes import RecipeError, suggest_recipes
+from history import History
+from recipes import RecipeError, extract_recipe_names, suggest_recipes
 
 log = logging.getLogger(__name__)
 
@@ -24,9 +26,13 @@ TELEGRAM_MESSAGE_LIMIT = 4096
 
 HELP_TEXT = (
     "🧊 Buzdolabınızın fotoğrafını gönderin, size 3 tarif önereyim!\n"
-    "İsterseniz fotoğrafa bir not ekleyin (örn. \"vejetaryen\" veya \"30 dakikada\").\n\n"
+    "İsterseniz fotoğrafa bir not ekleyin (örn. \"vejetaryen\" veya \"30 dakikada\").\n"
+    "Son {days} günde önerilen tarifler tekrar önerilmez.\n\n"
+    "/recent – son önerilen tarifleri göster\n"
+    "/forget – tarif geçmişini temizle\n\n"
     "🧊 Send me a photo of your fridge and I'll suggest 3 recipes.\n"
-    "Add a caption in English to get the recipes in English."
+    "Add a caption in English to get the recipes in English.\n"
+    "Dishes suggested in the last {days} days won't be repeated."
 )
 
 ERROR_TEXT = (
@@ -88,19 +94,34 @@ async def process_photos(
 ) -> None:
     chat_id = messages[0].chat_id
     caption = next((m.caption for m in messages if m.caption), None)
+    history: History = context.bot_data["history"]
     stop_typing = asyncio.Event()
     typing_task = asyncio.create_task(_keep_typing(context, chat_id, stop_typing))
     try:
+        try:
+            avoid = history.recent_names()
+        except Exception:
+            log.exception("Failed to read recipe history; continuing without it")
+            avoid = []
         images = [await _download_image(message) for message in messages]
         text = await suggest_recipes(
             context.bot_data["gemini_client"],
             context.bot_data["config"],
             images,
             caption,
+            avoid=avoid,
         )
         stop_typing.set()
         for chunk in split_message(text):
             await context.bot.send_message(chat_id, chunk)
+        names = extract_recipe_names(text)
+        if names:
+            try:
+                history.add(names)
+            except Exception:
+                log.exception("Failed to save recipe history")
+        else:
+            log.warning("No recipe names found in reply; history not updated")
     except RecipeError as exc:
         stop_typing.set()
         await context.bot.send_message(chat_id, ERROR_TEXT + str(exc))
@@ -155,11 +176,56 @@ def split_message(text: str, limit: int = TELEGRAM_MESSAGE_LIMIT) -> list[str]:
 
 
 async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.effective_message.reply_text(HELP_TEXT)
+    days = context.bot_data["config"].history_days
+    await update.effective_message.reply_text(HELP_TEXT.format(days=days))
 
 
 async def handle_other(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.effective_message.reply_text(HELP_TEXT)
+    days = context.bot_data["config"].history_days
+    await update.effective_message.reply_text(HELP_TEXT.format(days=days))
+
+
+def _age_label(suggested_at, now) -> str:
+    days = (now.date() - suggested_at.date()).days
+    if days <= 0:
+        return "bugün"
+    if days == 1:
+        return "dün"
+    return f"{days} gün önce"
+
+
+async def handle_recent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    history: History = context.bot_data["history"]
+    days = context.bot_data["config"].history_days
+    try:
+        rows = history.recent()
+    except Exception:
+        log.exception("Failed to read recipe history")
+        await update.effective_message.reply_text("😞 Geçmiş okunamadı.")
+        return
+    if not rows:
+        await update.effective_message.reply_text(
+            f"🗒 Son {days} günde önerilmiş tarif yok."
+        )
+        return
+    now = datetime.now(timezone.utc)
+    lines = [f"• {name} ({_age_label(ts, now)})" for name, ts in rows]
+    await update.effective_message.reply_text(
+        f"🗒 Son {days} günde önerilenler:\n" + "\n".join(lines)
+    )
+
+
+async def handle_forget(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    history: History = context.bot_data["history"]
+    try:
+        count = history.clear()
+    except Exception:
+        log.exception("Failed to clear recipe history")
+        await update.effective_message.reply_text("😞 Geçmiş temizlenemedi.")
+        return
+    await update.effective_message.reply_text(
+        f"🧹 Tarif geçmişi temizlendi ({count} kayıt silindi)."
+    )
 
 
 def main() -> None:
@@ -174,6 +240,7 @@ def main() -> None:
     application.bot_data["config"] = config
     application.bot_data["gemini_client"] = genai.Client(api_key=config.gemini_api_key)
     application.bot_data["album_buffer"] = AlbumBuffer()
+    application.bot_data["history"] = History(config.history_db, config.history_days)
 
     # Messages from users outside the allowlist match no handler and are
     # silently ignored, so strangers cannot spend the Gemini quota.
@@ -182,6 +249,8 @@ def main() -> None:
     application.add_handler(
         CommandHandler(["start", "help"], handle_start, filters=allowed)
     )
+    application.add_handler(CommandHandler("recent", handle_recent, filters=allowed))
+    application.add_handler(CommandHandler("forget", handle_forget, filters=allowed))
     application.add_handler(MessageHandler(allowed & photo_like, handle_photo))
     application.add_handler(
         MessageHandler(allowed & ~photo_like & ~filters.COMMAND, handle_other)
