@@ -260,7 +260,7 @@ def main() -> None:
         "Starting fridge-chef (main=%s, fallback=%s, %d allowed user(s))",
         config.main_model, config.fallback_model, len(config.allowed_user_ids),
     )
-    application.run_polling(allowed_updates=["message"])
+    application.run_polling(allowed_updates=["message"], bootstrap_retries=-1)
 
 
 if __name__ == "__main__":
