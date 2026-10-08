@@ -1,8 +1,8 @@
 import os
 from dataclasses import dataclass
 
-DEFAULT_MAIN_MODEL = "gemini-2.5-flash-lite"
-DEFAULT_FALLBACK_MODEL = "gemini-2.5-flash"
+DEFAULT_MAIN_MODEL = "gemini-3.5-flash-lite"
+DEFAULT_FALLBACK_MODEL = "gemini-2.5-flash-lite"
 DEFAULT_HISTORY_DAYS = 5
 DEFAULT_HISTORY_DB = "data/history.db"
 

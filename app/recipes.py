@@ -112,7 +112,6 @@ async def _generate(client: genai.Client, model: str, contents: list) -> str:
         model=model,
         contents=contents,
         config=types.GenerateContentConfig(
-            temperature=0.7,
             http_options=types.HttpOptions(timeout=REQUEST_TIMEOUT_MS),
         ),
     )
